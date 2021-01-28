@@ -20,6 +20,10 @@ find_package(catkin REQUIRED COMPONENTS
   message_generation
   visualization_msgs
 )
+find_package(Boost REQUIRED COMPONENTS system timer)
+IF(BOOST_FOUND)
+   MESSAGE(STATUS "Found BOOST: ${BOOST_INCLUDE_DIRS} ${BOOST_LIBRARIES}")
+ENDIF(BOOST_FOUND)
 
 find_package(OpenMP REQUIRED)
 find_package(PCL REQUIRED QUIET)
@@ -60,7 +64,7 @@ include_directories(
 	${catkin_INCLUDE_DIRS}
 	${PCL_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS}
-	${GTSAM_INCLUDE_DIR}
+  ${GTSAM_INCLUDE_DIR}
 )
 
 # link directories
@@ -93,4 +97,4 @@ target_link_libraries(${PROJECT_NAME}_mapOptmization ${catkin_LIBRARIES} ${PCL_L
 
 # IMU Preintegration
 add_executable(${PROJECT_NAME}_imuPreintegration src/imuPreintegration.cpp)
-target_link_libraries(${PROJECT_NAME}_imuPreintegration ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES} gtsam)
+target_link_libraries(${PROJECT_NAME}_imuPreintegration ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${OpenCV_LIBRARIES}  gtsam )

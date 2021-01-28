@@ -71,6 +71,7 @@ public:
     ros::Publisher pubRecentKeyFrame;
     ros::Publisher pubCloudRegisteredRaw;
     ros::Publisher pubLoopConstraintEdge;
+    ros::Publisher pubPoseGraph;
 
     ros::Subscriber subCloud;
     ros::Subscriber subGPS;
@@ -157,7 +158,6 @@ public:
         isam = new ISAM2(parameters);
 
         pubKeyPoses                 = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/trajectory", 1);
-        pubLaserCloudSurround       = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/map_global", 1);
         pubLaserOdometryGlobal      = nh.advertise<nav_msgs::Odometry> ("lio_sam/mapping/odometry", 1);
         pubLaserOdometryIncremental = nh.advertise<nav_msgs::Odometry> ("lio_sam/mapping/odometry_incremental", 1);
         pubPath                     = nh.advertise<nav_msgs::Path>("lio_sam/mapping/path", 1);
@@ -169,6 +169,8 @@ public:
         pubHistoryKeyFrames   = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/icp_loop_closure_history_cloud", 1);
         pubIcpKeyFrames       = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/icp_loop_closure_corrected_cloud", 1);
         pubLoopConstraintEdge = nh.advertise<visualization_msgs::MarkerArray>("/lio_sam/mapping/loop_closure_constraints", 1);
+        pubPoseGraph          = nh.advertise<geometry_msgs::PoseArray>("lio_sam/mapping/pose_graph_nodes", 1);
+
 
         pubRecentKeyFrames    = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/map_local", 1);
         pubRecentKeyFrame     = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/cloud_registered", 1);
@@ -675,6 +677,8 @@ public:
             return;
         
         visualization_msgs::MarkerArray markerArray;
+
+
         // loop nodes
         visualization_msgs::Marker markerNode;
         markerNode.header.frame_id = odometryFrame;
@@ -700,6 +704,11 @@ public:
         markerEdge.color.r = 0.9; markerEdge.color.g = 0.9; markerEdge.color.b = 0;
         markerEdge.color.a = 1;
 
+        geometry_msgs::PoseArray poseArray; 
+        poseArray.poses.clear(); // Clear last block perception result
+        poseArray.header.stamp = timeLaserInfoStamp;
+        poseArray.header.frame_id = odometryFrame;
+
         for (auto it = loopIndexContainer.begin(); it != loopIndexContainer.end(); ++it)
         {
             int key_cur = it->first;
@@ -715,11 +724,24 @@ public:
             p.z = copy_cloudKeyPoses6D->points[key_pre].z;
             markerNode.points.push_back(p);
             markerEdge.points.push_back(p);
+
+            geometry_msgs::PoseStamped pose;
+            pose.pose.position.x = copy_cloudKeyPoses6D->points[key_cur].x;
+            pose.pose.position.y = copy_cloudKeyPoses6D->points[key_cur].y;
+            pose.pose.position.z = copy_cloudKeyPoses6D->points[key_cur].z;
+
+            poseArray.poses.push_back(pose.pose);
+
+
         }
 
         markerArray.markers.push_back(markerNode);
         markerArray.markers.push_back(markerEdge);
         pubLoopConstraintEdge.publish(markerArray);
+
+        pubPoseGraph.publish(poseArray);
+        ROS_INFO("poseArray size: %i", poseArray.poses.size()); //this outputs poses
+
     }
 
 

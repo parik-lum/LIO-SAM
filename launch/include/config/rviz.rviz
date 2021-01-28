@@ -471,6 +471,14 @@ Visualization Manager:
             {}
           Queue Size: 100
           Value: true
+        - Class: rviz/PoseArray
+          Enabled: true
+          Topic: /lio_sam/mapping/pose_graph_nodes
+          Name: Pose graph
+          Namespaces:
+            {}
+          Queue Size: 2000
+          Value: true
       Enabled: true
       Name: Mapping
   Enabled: true
