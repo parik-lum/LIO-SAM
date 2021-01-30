@@ -15,6 +15,8 @@
 #include <gtsam/inference/Symbol.h>
 
 #include <gtsam/nonlinear/ISAM2.h>
+#include <geometry_msgs/PoseArray.h>
+#include <unordered_map>
 
 using namespace gtsam;
 
@@ -149,6 +151,15 @@ public:
     Eigen::Affine3f incrementalOdometryAffineFront;
     Eigen::Affine3f incrementalOdometryAffineBack;
 
+    //For pose graph visualization
+    geometry_msgs::PoseArray poseArray; 
+    ros::Timer poseGraphTimer;
+    std::unordered_map<int,gtsam::Pose3> nodes;
+    std::vector<std::pair<int,int> > edges;
+
+    
+    
+
 
     mapOptimization()
     {
@@ -169,7 +180,7 @@ public:
         pubHistoryKeyFrames   = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/icp_loop_closure_history_cloud", 1);
         pubIcpKeyFrames       = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/icp_loop_closure_corrected_cloud", 1);
         pubLoopConstraintEdge = nh.advertise<visualization_msgs::MarkerArray>("/lio_sam/mapping/loop_closure_constraints", 1);
-        pubPoseGraph          = nh.advertise<geometry_msgs::PoseArray>("lio_sam/mapping/pose_graph_nodes", 1);
+        pubPoseGraph          = nh.advertise<geometry_msgs::PoseArray>("lio_sam/mapping/pose_graph_nodes", 10);
 
 
         pubRecentKeyFrames    = nh.advertise<sensor_msgs::PointCloud2>("lio_sam/mapping/map_local", 1);
@@ -181,7 +192,12 @@ public:
         downSizeFilterICP.setLeafSize(mappingSurfLeafSize, mappingSurfLeafSize, mappingSurfLeafSize);
         downSizeFilterSurroundingKeyPoses.setLeafSize(surroundingKeyframeDensity, surroundingKeyframeDensity, surroundingKeyframeDensity); // for surrounding key poses of scan-to-map optimization
 
+        poseGraphTimer = nh.createTimer(ros::Duration(1/10.0),std::bind(&mapOptimization::publishPoseGraph,this));
+
         allocateMemory();
+
+        
+
     }
 
     void allocateMemory()
@@ -225,6 +241,9 @@ public:
         }
 
         matP = cv::Mat(6, 6, CV_32F, cv::Scalar::all(0));
+        
+        poseArray.poses.clear();
+        
     }
 
     void laserCloudInfoHandler(const lio_sam::cloud_infoConstPtr& msgIn)
@@ -260,6 +279,9 @@ public:
             publishOdometry();
 
             publishFrames();
+
+            // publishPoseGraph();
+
         }
     }
 
@@ -552,6 +574,7 @@ public:
         loopIndexQueue.push_back(make_pair(loopKeyCur, loopKeyPre));
         loopPoseQueue.push_back(poseFrom.between(poseTo));
         loopNoiseQueue.push_back(constraintNoise);
+
         mtx.unlock();
 
         // add loop constriant
@@ -704,10 +727,6 @@ public:
         markerEdge.color.r = 0.9; markerEdge.color.g = 0.9; markerEdge.color.b = 0;
         markerEdge.color.a = 1;
 
-        geometry_msgs::PoseArray poseArray; 
-        poseArray.poses.clear(); // Clear last block perception result
-        poseArray.header.stamp = timeLaserInfoStamp;
-        poseArray.header.frame_id = odometryFrame;
 
         for (auto it = loopIndexContainer.begin(); it != loopIndexContainer.end(); ++it)
         {
@@ -725,26 +744,43 @@ public:
             markerNode.points.push_back(p);
             markerEdge.points.push_back(p);
 
-            geometry_msgs::PoseStamped pose;
-            pose.pose.position.x = copy_cloudKeyPoses6D->points[key_cur].x;
-            pose.pose.position.y = copy_cloudKeyPoses6D->points[key_cur].y;
-            pose.pose.position.z = copy_cloudKeyPoses6D->points[key_cur].z;
-
-            poseArray.poses.push_back(pose.pose);
-
-
         }
 
         markerArray.markers.push_back(markerNode);
         markerArray.markers.push_back(markerEdge);
         pubLoopConstraintEdge.publish(markerArray);
 
-        pubPoseGraph.publish(poseArray);
-        ROS_INFO("poseArray size: %i", poseArray.poses.size()); //this outputs poses
 
     }
 
+    void publishPoseGraph()
+    {
 
+
+        for(const auto& it:nodes){
+            gtsam::Pose3 p = it.second;
+            geometry_msgs::PoseStamped ps;
+
+            ps.pose.position.x = p.x();
+            ps.pose.position.y = p.y();
+            ps.pose.position.z = p.z();
+            poseArray.poses.push_back(ps.pose);
+        }
+
+
+        ROS_INFO("Callback to posegraph triggered, size of posearray = %i, globalPath = %i, nodes.size() = %i", poseArray.poses.size(), globalPath.poses.size(), nodes.size() );
+        for(int i =0;i<poseArray.poses.size(); ++i){
+            ROS_INFO("x = %f, y = %f, z = %f\n",poseArray.poses[i].position.x, 
+                                                poseArray.poses[i].position.y, 
+                                                poseArray.poses[i].position.z  );
+        }
+        {
+            poseArray.header.stamp = timeLaserInfoStamp;
+            poseArray.header.frame_id = odometryFrame;
+            pubPoseGraph.publish(poseArray);
+        }
+
+    }
 
 
 
@@ -1344,14 +1380,19 @@ public:
         {
             noiseModel::Diagonal::shared_ptr priorNoise = noiseModel::Diagonal::Variances((Vector(6) << 1e-2, 1e-2, M_PI*M_PI, 1e8, 1e8, 1e8).finished()); // rad*rad, meter*meter
             gtSAMgraph.add(PriorFactor<Pose3>(0, trans2gtsamPose(transformTobeMapped), priorNoise));
+            nodes[nodes.size()+1] = trans2gtsamPose(transformTobeMapped);
             initialEstimate.insert(0, trans2gtsamPose(transformTobeMapped));
         }else{
             noiseModel::Diagonal::shared_ptr odometryNoise = noiseModel::Diagonal::Variances((Vector(6) << 1e-6, 1e-6, 1e-6, 1e-4, 1e-4, 1e-4).finished());
             gtsam::Pose3 poseFrom = pclPointTogtsamPose3(cloudKeyPoses6D->points.back());
+            nodes[nodes.size()+1] = poseFrom;
             gtsam::Pose3 poseTo   = trans2gtsamPose(transformTobeMapped);
+            nodes[nodes.size()+1] = poseTo;
             gtSAMgraph.add(BetweenFactor<Pose3>(cloudKeyPoses3D->size()-1, cloudKeyPoses3D->size(), poseFrom.between(poseTo), odometryNoise));
+            edges.push_back({nodes.size()-1,nodes.size()});
             initialEstimate.insert(cloudKeyPoses3D->size(), poseTo);
         }
+        ROS_INFO("Here, Nodes.size() = %d\n", (int)nodes.size());
     }
 
     void addGPSFactor()
